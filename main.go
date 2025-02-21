@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	golog "github.com/ipfs/go-log/v2"
+	"golang.org/x/exp/slices"
 	"io"
 	"os"
 	"os/signal"
@@ -99,7 +100,21 @@ func main() {
 					gossipPeers = append(gossipPeers, id)
 				}
 				cnnPeers := server.Host().Network().Peers()
+				slices.Sort(gossipPeers)
+				slices.Sort(cnnPeers)
 				fmt.Printf("peer stats:\ngossip peers: %d|%v\nconnected peers: %d|%v\n", len(gossipPeers), gossipPeers, len(cnnPeers), cnnPeers)
+				// print all conn with peer addr, protocols
+				for _, conn := range server.Host().Network().Conns() {
+					remotePeer := conn.RemotePeer()
+					remoteAddr := conn.RemoteMultiaddr()
+					var protocols []string
+					for _, proto := range remoteAddr.Protocols() {
+						protocols = append(protocols, proto.Name)
+					}
+					fmt.Printf("Peer %s connected via %s, protocols: %v\n",
+						remotePeer.String(),
+						remoteAddr.String(), protocols)
+				}
 			}
 		}
 	}()
@@ -122,6 +137,7 @@ func randomPing(server *p2p.Server) {
 			if len(cnnPeers) == 0 {
 				continue
 			}
+			start := time.Now()
 			pid := cnnPeers[rand.Int()%len(cnnPeers)]
 			stream, err := server.Send(ctx, fmt.Sprintf("ping_%d", *port), p2p.TopicPrefix+"ping", pid)
 			if err != nil {
@@ -133,7 +149,7 @@ func randomPing(server *p2p.Server) {
 				fmt.Println("read ping resp err", err)
 				continue
 			}
-			fmt.Printf("receive %v from %v\n", string(data), pid)
+			fmt.Printf("receive %v from %v, cost: %v\n", string(data), pid, time.Since(start).Milliseconds())
 			stream.Close()
 		}
 	}
