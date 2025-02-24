@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ var (
 	bootstrap           = flag.String("bootstrap", "/ip4/127.0.0.1/tcp/63785/p2p/QmWjz6xb8v9K4KnYEwP5Yk75k5mMBCehzWFLCvvQpYxF3d", "Comma separated list of bootstrap peers")
 	localPeerID peer.ID = ""
 	cachedPeers         = make(map[peer.ID]struct{})
+	lock                = sync.RWMutex{}
 )
 
 func main() {
@@ -84,7 +86,9 @@ func main() {
 			fmt.Println("write ping resp err", err)
 			return
 		}
+		lock.Lock()
 		cachedPeers[stream.Conn().RemotePeer()] = struct{}{}
+		lock.Unlock()
 	})
 	go randomPing(server)
 	go func() {
@@ -92,13 +96,16 @@ func main() {
 			t := time.After(10 * time.Second)
 			select {
 			case <-t:
+				lock.Lock()
 				if len(cachedPeers) == 0 {
+					lock.Unlock()
 					continue
 				}
 				var gossipPeers []peer.ID
 				for id := range cachedPeers {
 					gossipPeers = append(gossipPeers, id)
 				}
+				lock.Unlock()
 				cnnPeers := server.Host().Network().Peers()
 				slices.Sort(gossipPeers)
 				slices.Sort(cnnPeers)
@@ -164,11 +171,14 @@ func voteHandle(sub *pubsub.Subscription) {
 			fmt.Println("voteHandle err", err)
 			continue
 		}
-		if msg.GetFrom() == localPeerID {
+		from := msg.GetFrom()
+		if from == localPeerID {
 			continue
 		}
-		fmt.Printf("receive %v from %v\n", string(msg.Data), msg.GetFrom())
-		cachedPeers[msg.GetFrom()] = struct{}{}
+		fmt.Printf("receive %v from %v\n", string(msg.Data), from)
+		lock.Lock()
+		cachedPeers[from] = struct{}{}
+		lock.Unlock()
 	}
 }
 
@@ -186,7 +196,9 @@ func blockHandle(sub *pubsub.Subscription) {
 			continue
 		}
 		fmt.Printf("receive %v from %v\n", string(msg.Data), from)
+		lock.Lock()
 		cachedPeers[from] = struct{}{}
+		lock.Unlock()
 	}
 }
 
